@@ -90,6 +90,11 @@ class Configuration(BaseModel):
         title="LLM Model ID",
         description="Optional model identifier for custom OpenAI-compatible services",
     )
+    database_path: str = Field(
+        default="./data/research.db",
+        title="Database Path",
+        description="SQLite database path for persisted research sessions",
+    )
 
     def validate_runtime(self) -> None:
         """Validate the minimum runtime configuration before executing requests."""
@@ -131,7 +136,12 @@ class Configuration(BaseModel):
                 )
 
     @classmethod
-    def from_env(cls, overrides: Optional[dict[str, Any]] = None) -> "Configuration":
+    def from_env(
+        cls,
+        overrides: Optional[dict[str, Any]] = None,
+        *,
+        validate_runtime: bool = True,
+    ) -> "Configuration":
         """Create a configuration object using environment variables and overrides."""
 
         raw_values: dict[str, Any] = {}
@@ -158,6 +168,7 @@ class Configuration(BaseModel):
             "search_api": os.getenv("SEARCH_API"),
             "enable_notes": os.getenv("ENABLE_NOTES"),
             "notes_workspace": os.getenv("NOTES_WORKSPACE"),
+            "database_path": os.getenv("DATABASE_PATH"),
         }
 
         for key, value in env_aliases.items():
@@ -170,7 +181,8 @@ class Configuration(BaseModel):
                     raw_values[key] = value
 
         config = cls(**raw_values)
-        config.validate_runtime()
+        if validate_runtime:
+            config.validate_runtime()
         return config
 
     def sanitized_ollama_url(self) -> str:
