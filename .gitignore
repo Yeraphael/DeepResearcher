@@ -1,0 +1,14 @@
+.idea/
+backend/.venv/
+backend/.uv-cache/
+backend/DeepResearcher.egg-info/
+backend/src/DeepResearcher.egg-info/
+backend/notes/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/.env
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+.env
+.env.local
