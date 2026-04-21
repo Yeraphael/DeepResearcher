@@ -7,11 +7,18 @@ from typing import Tuple
 
 from hello_agents import ToolAwareSimpleAgent
 
-from models import SummaryState, TodoItem
-from config import Configuration
-from utils import strip_thinking_tokens
-from services.notes import build_note_guidance
-from services.text_processing import strip_tool_calls
+try:
+    from ..config import Configuration
+    from ..models import SummaryState, TodoItem
+    from ..utils import strip_thinking_tokens
+    from .notes import build_note_guidance
+    from .text_processing import strip_tool_calls
+except ImportError:  # pragma: no cover - script-mode fallback
+    from models import SummaryState, TodoItem
+    from config import Configuration
+    from utils import strip_thinking_tokens
+    from services.notes import build_note_guidance
+    from services.text_processing import strip_tool_calls
 
 
 class SummarizationService:

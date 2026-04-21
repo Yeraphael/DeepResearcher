@@ -13,12 +13,20 @@ for stream_name in ("stdout", "stderr"):
 
 from hello_agents.tools import SearchTool
 
-from config import Configuration
-from utils import (
-    deduplicate_and_format_sources,
-    format_sources,
-    get_config_value,
-)
+try:
+    from ..config import Configuration
+    from ..utils import (
+        deduplicate_and_format_sources,
+        format_sources,
+        get_config_value,
+    )
+except ImportError:  # pragma: no cover - script-mode fallback
+    from config import Configuration
+    from utils import (
+        deduplicate_and_format_sources,
+        format_sources,
+        get_config_value,
+    )
 
 logger = logging.getLogger(__name__)
 

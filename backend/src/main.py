@@ -12,10 +12,13 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from config import Configuration, SearchAPI
-from agent import DeepResearchAgent
+try:
+    from .agent import DeepResearchAgent
+    from .config import Configuration, SearchAPI
+except ImportError:  # pragma: no cover - script-mode fallback
+    from agent import DeepResearchAgent
+    from config import Configuration, SearchAPI
 
-# 添加控制台日志处理程序
 logger.add(
     sys.stderr,
     level="INFO",
@@ -23,8 +26,6 @@ logger.add(
     colorize=True,
 )
 
-
-# 添加错误日志文件处理程序
 logger.add(
     sink=sys.stderr,
     level="ERROR",
@@ -40,6 +41,14 @@ class ResearchRequest(BaseModel):
     search_api: SearchAPI | None = Field(
         default=None,
         description="Override the default search backend configured via env",
+    )
+    thread_id: str | None = Field(
+        default=None,
+        description="Optional LangGraph thread id for checkpointed runs",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session id stored alongside the checkpoint thread",
     )
 
 
@@ -57,6 +66,7 @@ class ResearchResponse(BaseModel):
 
 def _mask_secret(value: Optional[str], visible: int = 4) -> str:
     """Mask sensitive tokens while keeping leading and trailing characters."""
+
     if not value:
         return "unset"
 
@@ -123,7 +133,7 @@ def create_app() -> FastAPI:
 
         logger.info(
             "DeepResearch configuration loaded: provider=%s model=%s base_url=%s search_api=%s "
-            "max_loops=%s fetch_full_page=%s tool_calling=%s strip_thinking=%s api_key=%s",
+            "max_loops=%s fetch_full_page=%s tool_calling=%s strip_thinking=%s api_key=%s checkpoint=%s",
             config.llm_provider,
             config.resolved_model() or "unset",
             base_url,
@@ -133,6 +143,7 @@ def create_app() -> FastAPI:
             config.use_tool_calling,
             config.strip_thinking_tokens,
             _mask_secret(config.llm_api_key),
+            config.resolved_checkpoint_path(),
         )
 
     @app.get("/healthz")
@@ -141,17 +152,25 @@ def create_app() -> FastAPI:
 
     @app.post("/research", response_model=ResearchResponse)
     def run_research(payload: ResearchRequest) -> ResearchResponse:
+        agent: DeepResearchAgent | None = None
         try:
             config = _build_config(payload)
             agent = DeepResearchAgent(config=config)
-            result = agent.run(payload.topic)
-        except ValueError as exc:  # Likely due to unsupported configuration
+            result = agent.run(
+                payload.topic,
+                thread_id=payload.thread_id,
+                session_id=payload.session_id,
+            )
+        except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:  # pragma: no cover - defensive guardrail
+        except Exception as exc:
             raise HTTPException(
                 status_code=500,
                 detail=_humanize_runtime_error(exc),
             ) from exc
+        finally:
+            if agent is not None:
+                agent.close()
 
         todo_payload = [
             {
@@ -183,15 +202,21 @@ def create_app() -> FastAPI:
 
         def event_iterator() -> Iterator[str]:
             try:
-                for event in agent.run_stream(payload.topic):
+                for event in agent.run_stream(
+                    payload.topic,
+                    thread_id=payload.thread_id,
+                    session_id=payload.session_id,
+                ):
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except Exception as exc:  # pragma: no cover - defensive guardrail
+            except Exception as exc:
                 logger.exception("Streaming research failed")
                 error_payload = {
                     "type": "error",
                     "detail": _humanize_runtime_error(exc),
                 }
                 yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
+            finally:
+                agent.close()
 
         return StreamingResponse(
             event_iterator(),
@@ -212,9 +237,9 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "main:app",
+        "src.main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level="info"
+        log_level="info",
     )

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-from models import TodoItem
+try:
+    from ..models import TodoItem
+except ImportError:  # pragma: no cover - script-mode fallback
+    from models import TodoItem
 
 
 def build_note_guidance(task: TodoItem) -> str:

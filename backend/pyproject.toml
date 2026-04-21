@@ -19,6 +19,8 @@ dependencies = [
     "ddgs>=9.6.1",
     "loguru>=0.7.3",
     "huggingface-hub>=1.11.0",
+    "langgraph>=1.1.8",
+    "langgraph-checkpoint-sqlite>=3.0.3",
 ]
 
 [project.optional-dependencies]
@@ -62,4 +64,6 @@ convention = "google"
 [dependency-groups]
 dev = [
     "ruff>=0.12.7",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
 ]

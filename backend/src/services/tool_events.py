@@ -9,7 +9,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Optional
 
-from models import SummaryState, TodoItem
+try:
+    from ..models import SummaryState, TodoItem
+except ImportError:  # pragma: no cover - script-mode fallback
+    from models import SummaryState, TodoItem
 
 logger = logging.getLogger(__name__)
 

@@ -90,6 +90,11 @@ class Configuration(BaseModel):
         title="LLM Model ID",
         description="Optional model identifier for custom OpenAI-compatible services",
     )
+    langgraph_checkpoint_path: str = Field(
+        default="data/langgraph_checkpoints.sqlite",
+        title="LangGraph Checkpoint Path",
+        description="SQLite file used to persist LangGraph checkpoints",
+    )
 
     def validate_runtime(self) -> None:
         """Validate the minimum runtime configuration before executing requests."""
@@ -158,6 +163,7 @@ class Configuration(BaseModel):
             "search_api": os.getenv("SEARCH_API"),
             "enable_notes": os.getenv("ENABLE_NOTES"),
             "notes_workspace": os.getenv("NOTES_WORKSPACE"),
+            "langgraph_checkpoint_path": os.getenv("LANGGRAPH_CHECKPOINT_PATH"),
         }
 
         for key, value in env_aliases.items():
@@ -185,4 +191,13 @@ class Configuration(BaseModel):
         """Best-effort resolution of the model identifier to use."""
 
         return self.llm_model_id or self.local_llm
+
+    def resolved_checkpoint_path(self) -> Path:
+        """Return the absolute LangGraph checkpoint database path."""
+
+        path = Path(self.langgraph_checkpoint_path)
+        if path.is_absolute():
+            return path
+        backend_root = Path(__file__).resolve().parent.parent
+        return backend_root / path
 

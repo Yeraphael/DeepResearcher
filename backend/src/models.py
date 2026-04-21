@@ -27,15 +27,21 @@ class TodoItem:
 @dataclass(kw_only=True)
 class SummaryState:
     research_topic: str = field(default=None)  # Report topic
+    session_id: Optional[str] = field(default=None)
+    thread_id: Optional[str] = field(default=None)
+    run_id: Optional[str] = field(default=None)
     search_query: str = field(default=None)  # Deprecated placeholder
     web_research_results: Annotated[list, operator.add] = field(default_factory=list)
     sources_gathered: Annotated[list, operator.add] = field(default_factory=list)
     research_loop_count: int = field(default=0)  # Research loop count
+    status: Optional[str] = field(default=None)
+    current_stage: Optional[str] = field(default=None)
     running_summary: str = field(default=None)  # Legacy summary field
     todo_items: Annotated[list, operator.add] = field(default_factory=list)
     structured_report: Optional[str] = field(default=None)
     report_note_id: Optional[str] = field(default=None)
     report_note_path: Optional[str] = field(default=None)
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass(kw_only=True)
