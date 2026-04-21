@@ -4,10 +4,6 @@ backend/.uv-cache/
 backend/DeepResearcher.egg-info/
 backend/src/DeepResearcher.egg-info/
 backend/notes/
-backend/data/
-backend/**/*.db
-backend/**/*.db-shm
-backend/**/*.db-wal
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/.env
