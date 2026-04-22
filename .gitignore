@@ -4,8 +4,10 @@ backend/.uv-cache/
 backend/DeepResearcher.egg-info/
 backend/src/DeepResearcher.egg-info/
 backend/notes/
+backend/data/*.sqlite
 backend/**/__pycache__/
 backend/**/*.pyc
+tests/__pycache__/
 backend/.env
 frontend/node_modules/
 frontend/dist/

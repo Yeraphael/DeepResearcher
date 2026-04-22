@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterator
+from typing import AsyncIterator, Iterator
 
 try:
     from .application.research_runner import ResearchRunner
@@ -26,6 +26,22 @@ class DeepResearchAgent:
         self.config = config or Configuration.from_env()
         self._runner = runner or ResearchRunner(config=self.config)
 
+    @classmethod
+    async def create(
+        cls,
+        config: Configuration | None = None,
+        *,
+        runner: ResearchRunner | None = None,
+    ) -> "DeepResearchAgent":
+        """Async factory that wires the async LangGraph runner safely."""
+
+        if runner is not None:
+            return cls(config=config, runner=runner)
+
+        resolved_config = config or Configuration.from_env()
+        resolved_runner = await ResearchRunner.create(config=resolved_config)
+        return cls(config=resolved_config, runner=resolved_runner)
+
     def run(
         self,
         topic: str,
@@ -36,6 +52,21 @@ class DeepResearchAgent:
         """Execute the research workflow and return the final report."""
 
         return self._runner.invoke(
+            topic,
+            thread_id=thread_id,
+            session_id=session_id,
+        )
+
+    async def arun(
+        self,
+        topic: str,
+        *,
+        thread_id: str | None = None,
+        session_id: str | None = None,
+    ) -> SummaryStateOutput:
+        """Async execution entrypoint backed by LangGraph .ainvoke()."""
+
+        return await self._runner.ainvoke(
             topic,
             thread_id=thread_id,
             session_id=session_id,
@@ -56,10 +87,31 @@ class DeepResearchAgent:
             session_id=session_id,
         )
 
+    async def arun_stream(
+        self,
+        topic: str,
+        *,
+        thread_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
+        """Async streaming execution entrypoint backed by LangGraph .astream()."""
+
+        async for event in self._runner.astream(
+            topic,
+            thread_id=thread_id,
+            session_id=session_id,
+        ):
+            yield event
+
     def close(self) -> None:
         """Release request-scoped resources."""
 
         self._runner.close()
+
+    async def aclose(self) -> None:
+        """Release request-scoped resources asynchronously."""
+
+        await self._runner.aclose()
 
     @property
     def _tool_call_events(self) -> list[dict[str, object]]:

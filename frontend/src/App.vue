@@ -136,7 +136,7 @@
       <!-- 右侧：研究结果 -->
       <section
         class="panel panel-result"
-        v-if="todoTasks.length || reportMarkdown || progressLogs.length"
+        v-if="loading || error || todoTasks.length || reportMarkdown || progressLogs.length"
       >
         <header class="status-bar">
           <div class="status-main">
@@ -714,11 +714,12 @@ const handleSubmit = async () => {
     currentController = null;
   }
 
+  isExpanded.value = true;
+  resetWorkflowState();
   loading.value = true;
   runState.value = "running";
   error.value = "";
-  isExpanded.value = true;
-  resetWorkflowState();
+  progressLogs.value.push("已提交研究请求，正在连接后端服务…");
 
   const controller = new AbortController();
   currentController = controller;
@@ -1004,6 +1005,7 @@ const handleSubmit = async () => {
     } else {
       runState.value = "failed";
       error.value = err instanceof Error ? err.message : "请求失败";
+      progressLogs.value.push(`请求失败：${error.value}`);
     }
   } finally {
     loading.value = false;

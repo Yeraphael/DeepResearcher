@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import queue
+import threading
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any, AsyncIterator, Iterator
 from uuid import uuid4
 
 from hello_agents import HelloAgentsLLM, ToolAwareSimpleAgent
@@ -17,10 +20,11 @@ try:
     from ..infrastructure.checkpoint import (
         SQLiteCheckpointerHandle,
         create_sqlite_checkpointer,
+        create_sqlite_checkpointer_async,
     )
     from ..models import SummaryStateOutput
     from ..prompts import (
-        report_writer_instructions,
+        report_writer_instructions_v2,
         task_summarizer_instructions,
         todo_planner_system_prompt,
     )
@@ -37,10 +41,11 @@ except ImportError:  # pragma: no cover - script-mode fallback
     from infrastructure.checkpoint import (
         SQLiteCheckpointerHandle,
         create_sqlite_checkpointer,
+        create_sqlite_checkpointer_async,
     )
     from models import SummaryStateOutput
     from prompts import (
-        report_writer_instructions,
+        report_writer_instructions_v2,
         task_summarizer_instructions,
         todo_planner_system_prompt,
     )
@@ -63,7 +68,7 @@ class GraphRuntime:
 
 
 class ResearchRunner:
-    """Run research requests on top of the LangGraph MVP workflow."""
+    """Run research requests on top of the LangGraph orchestrator-worker workflow."""
 
     def __init__(
         self,
@@ -80,7 +85,29 @@ class ResearchRunner:
         self.graph = graph or build_research_graph(self.runtime, self._checkpointer_handle.saver)
         self.event_translator = event_translator or GraphEventTranslator()
 
-    def invoke(
+    @classmethod
+    async def create(
+        cls,
+        config: Configuration | None = None,
+        *,
+        runtime: GraphRuntime | None = None,
+        graph: Any | None = None,
+        checkpointer_handle: SQLiteCheckpointerHandle | None = None,
+        event_translator: GraphEventTranslator | None = None,
+    ) -> "ResearchRunner":
+        """Async factory that avoids blocking the running event loop."""
+
+        self = cls.__new__(cls)
+        self.config = config or Configuration.from_env()
+        self.runtime = runtime or self._build_runtime()
+        self._checkpointer_handle = checkpointer_handle or await create_sqlite_checkpointer_async(
+            self.config
+        )
+        self.graph = graph or build_research_graph(self.runtime, self._checkpointer_handle.saver)
+        self.event_translator = event_translator or GraphEventTranslator()
+        return self
+
+    async def ainvoke(
         self,
         topic: str,
         *,
@@ -94,7 +121,7 @@ class ResearchRunner:
             thread_id=thread_id,
             session_id=session_id,
         )
-        final_state: ResearchGraphState = self.graph.invoke(
+        final_state: ResearchGraphState = await self.graph.ainvoke(
             initial_state,
             config=runnable_config,
         )
@@ -107,13 +134,30 @@ class ResearchRunner:
             todo_items=todo_items,
         )
 
-    def stream(
+    def invoke(
         self,
         topic: str,
         *,
         thread_id: str | None = None,
         session_id: str | None = None,
-    ) -> Iterator[dict[str, Any]]:
+    ) -> SummaryStateOutput:
+        """Synchronous compatibility wrapper around :meth:`ainvoke`."""
+
+        return asyncio.run(
+            self.ainvoke(
+                topic,
+                thread_id=thread_id,
+                session_id=session_id,
+            )
+        )
+
+    async def astream(
+        self,
+        topic: str,
+        *,
+        thread_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
         """Execute the graph in streaming mode using the legacy SSE shape."""
 
         initial_state, runnable_config = self._prepare_run(
@@ -122,7 +166,7 @@ class ResearchRunner:
             session_id=session_id,
         )
 
-        for part in self.graph.stream(
+        async for part in self.graph.astream(
             initial_state,
             config=runnable_config,
             stream_mode="custom",
@@ -133,10 +177,56 @@ class ResearchRunner:
 
         yield {"type": "done"}
 
+    def stream(
+        self,
+        topic: str,
+        *,
+        thread_id: str | None = None,
+        session_id: str | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Synchronous compatibility wrapper around :meth:`astream`."""
+
+        event_queue: queue.Queue[dict[str, Any] | BaseException | object] = queue.Queue()
+        sentinel = object()
+
+        def producer() -> None:
+            async def run() -> None:
+                try:
+                    async for event in self.astream(
+                        topic,
+                        thread_id=thread_id,
+                        session_id=session_id,
+                    ):
+                        event_queue.put(event)
+                except BaseException as exc:  # pragma: no cover - sync wrapper fallback
+                    event_queue.put(exc)
+                finally:
+                    event_queue.put(sentinel)
+
+            asyncio.run(run())
+
+        worker = threading.Thread(target=producer, name="research-stream", daemon=True)
+        worker.start()
+
+        while True:
+            item = event_queue.get()
+            if item is sentinel:
+                break
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+
+        worker.join(timeout=0.1)
+
     def close(self) -> None:
         """Release request-scoped infrastructure resources."""
 
-        self._checkpointer_handle.close()
+        asyncio.run(self.aclose())
+
+    async def aclose(self) -> None:
+        """Release request-scoped infrastructure resources asynchronously."""
+
+        await self._checkpointer_handle.aclose()
 
     def _prepare_run(
         self,
@@ -144,7 +234,7 @@ class ResearchRunner:
         *,
         thread_id: str | None,
         session_id: str | None,
-    ) -> tuple[ResearchGraphState, dict[str, dict[str, str]]]:
+    ) -> tuple[ResearchGraphState, dict[str, Any]]:
         resolved_thread_id = thread_id or uuid4().hex
         resolved_session_id = session_id or resolved_thread_id
         run_id = uuid4().hex
@@ -154,12 +244,13 @@ class ResearchRunner:
             thread_id=resolved_thread_id,
             run_id=run_id,
         )
-        runnable_config = {
+        runnable_config: dict[str, Any] = {
             "configurable": {
                 "thread_id": resolved_thread_id,
                 "session_id": resolved_session_id,
                 "run_id": run_id,
-            }
+            },
+            "max_concurrency": self.config.max_parallel_research_tasks,
         }
         return initial_state, runnable_config
 
@@ -167,11 +258,7 @@ class ResearchRunner:
         """Create the default runtime services and shared tools."""
 
         llm = self._init_llm()
-        note_tool = (
-            NoteTool(workspace=self.config.notes_workspace)
-            if self.config.enable_notes
-            else None
-        )
+        note_tool = NoteTool(workspace=self.config.notes_workspace) if self.config.enable_notes else None
         tools_registry: ToolRegistry | None = None
         if note_tool:
             registry = ToolRegistry()
@@ -182,32 +269,46 @@ class ResearchRunner:
             self.config.notes_workspace if self.config.enable_notes else None
         )
 
-        def make_agent(*, name: str, system_prompt: str) -> ToolAwareSimpleAgent:
+        def make_agent(
+            *,
+            name: str,
+            system_prompt: str,
+            allow_tools: bool = False,
+        ) -> ToolAwareSimpleAgent:
+            enable_tools = allow_tools and tools_registry is not None
             return ToolAwareSimpleAgent(
                 name=name,
                 llm=llm,
                 system_prompt=system_prompt,
-                enable_tool_calling=tools_registry is not None,
-                tool_registry=tools_registry,
-                tool_call_listener=tool_tracker.record,
+                enable_tool_calling=enable_tools,
+                tool_registry=tools_registry if enable_tools else None,
+                tool_call_listener=tool_tracker.record if enable_tools else None,
             )
 
         todo_agent = make_agent(
             name="研究规划专家",
             system_prompt=todo_planner_system_prompt.strip(),
+            allow_tools=note_tool is not None,
         )
         report_agent = make_agent(
             name="报告撰写专家",
-            system_prompt=report_writer_instructions.strip(),
+            system_prompt=report_writer_instructions_v2.strip(),
+            allow_tools=False,
         )
 
-        summarizer_factory = lambda: make_agent(
-            name="任务总结专家",
-            system_prompt=task_summarizer_instructions.strip(),
-        )
+        def summarizer_factory() -> ToolAwareSimpleAgent:
+            return make_agent(
+                name="任务总结专家",
+                system_prompt=task_summarizer_instructions.strip(),
+                allow_tools=False,
+            )
 
         planner = PlanningService(todo_agent, self.config)
-        summarizer = SummarizationService(summarizer_factory, self.config)
+        summarizer = SummarizationService(
+            summarizer_factory,
+            self.config,
+            include_note_guidance=False,
+        )
         reporting = ReportingService(report_agent, self.config)
         return GraphRuntime(
             config=self.config,

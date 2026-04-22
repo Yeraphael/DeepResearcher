@@ -9,9 +9,10 @@ from application.event_translator import GraphEventTranslator
 from application.research_runner import GraphRuntime, ResearchRunner
 from config import Configuration
 from graph.nodes.planner import make_plan_tasks_node
-from graph.nodes.report import make_compile_report_node
+from graph.nodes.report import make_build_report_outline_node, make_compile_report_node
 from graph.state import build_initial_graph_state
-from models import TodoItem
+from models import SummaryState, TodoItem
+from services.reporter import ReportingService
 from services.tool_events import ToolCallTracker
 
 
@@ -23,12 +24,14 @@ class FakePlanningService:
                 title="背景概览",
                 intent="梳理主题背景",
                 query=f"{state.research_topic} 背景",
+                dimension="背景概览",
             ),
             TodoItem(
                 id=2,
                 title="关键趋势",
                 intent="梳理主要趋势",
                 query=f"{state.research_topic} 趋势",
+                dimension="趋势比较",
             ),
         ]
 
@@ -38,6 +41,7 @@ class FakePlanningService:
             title="默认任务",
             intent="默认任务意图",
             query=state.research_topic,
+            dimension="背景概览",
         )
 
 
@@ -58,9 +62,41 @@ class FakeSummarizationService:
 
 
 class FakeReportingService:
-    def generate_report(self, state):
+    def build_report_outline(self, state, *, task_results=None):
+        return {
+            "executive_judgment": "AI agents are becoming the default automation layer.",
+            "comparison_dimensions": ["背景概览", "趋势比较"],
+            "section_plan": [
+                {"heading": "背景概览", "purpose": "Explain the topic", "task_ids": [1]},
+                {"heading": "趋势比较", "purpose": "Compare key trends", "task_ids": [2]},
+            ],
+            "table_plan": {
+                "title": "Comparison",
+                "columns": ["维度", "领先者/方案", "证据", "备注"],
+            },
+            "citation_focus": ["任务 1", "任务 2"],
+        }
+
+    def generate_report(self, state, *, report_outline=None, task_results=None):
         completed = ", ".join(task.title for task in state.todo_items)
-        return f"# Report\n\nTopic: {state.research_topic}\n\nTasks: {completed}"
+        dimensions = ", ".join((report_outline or {}).get("comparison_dimensions", []))
+        return (
+            "# Report\n\n"
+            f"Topic: {state.research_topic}\n\n"
+            f"Dimensions: {dimensions}\n\n"
+            f"Tasks: {completed}"
+        )
+
+
+class TimeoutReportAgent:
+    def __init__(self) -> None:
+        self.clear_count = 0
+
+    def run(self, prompt):
+        raise RuntimeError("Request timed out.")
+
+    def clear_history(self):
+        self.clear_count += 1
 
 
 def build_fake_runtime(config: Configuration) -> GraphRuntime:
@@ -96,6 +132,49 @@ def test_plan_tasks_node_outputs_valid_todos(workspace_tmp_path):
     todo_list_events = [event for event in result["ui_events"] if event["name"] == "todo_list"]
     assert todo_list_events
     assert todo_list_events[0]["payload"]["tasks"][0]["title"] == "背景概览"
+    assert result["task_specs"][0]["dimension"] == "背景概览"
+
+
+def test_build_report_outline_node_generates_outline(workspace_tmp_path):
+    config = Configuration(
+        enable_notes=False,
+        notes_workspace=str(workspace_tmp_path / "notes"),
+        langgraph_checkpoint_path=str(workspace_tmp_path / "checkpoints.sqlite"),
+    )
+    runtime = build_fake_runtime(config)
+    node = make_build_report_outline_node(runtime)
+    state = build_initial_graph_state(
+        topic="AI agents",
+        session_id="session-1",
+        thread_id="thread-1",
+        run_id="run-1",
+    )
+    state["todo_items"] = [
+        TodoItem(
+            id=1,
+            title="背景概览",
+            intent="梳理背景",
+            query="AI agents 背景",
+            dimension="背景概览",
+            status="completed",
+            summary="Task summary",
+            sources_summary="* source : https://example.com",
+        )
+    ]
+    state["task_results"] = [
+        {
+            "task_id": 1,
+            "title": "背景概览",
+            "dimension": "背景概览",
+            "summary": "Task summary",
+            "citations": ["https://example.com"],
+            "key_findings": ["Agents are growing fast"],
+        }
+    ]
+
+    result = node(state)
+
+    assert result["report_outline"]["comparison_dimensions"] == ["背景概览", "趋势比较"]
 
 
 def test_compile_report_node_generates_report(workspace_tmp_path):
@@ -118,17 +197,78 @@ def test_compile_report_node_generates_report(workspace_tmp_path):
             title="背景概览",
             intent="梳理背景",
             query="AI agents 背景",
+            dimension="背景概览",
             status="completed",
             summary="Task summary",
             sources_summary="* source : https://example.com",
         )
     ]
     state["running_summary"] = "Task summary"
+    state["report_outline"] = {
+        "comparison_dimensions": ["背景概览"],
+    }
+    state["task_results"] = [
+        {
+            "task_id": 1,
+            "title": "背景概览",
+            "dimension": "背景概览",
+            "summary": "Task summary",
+        }
+    ]
 
     result = node(state)
 
     assert result["structured_report"].startswith("# Report")
     assert "背景概览" in result["structured_report"]
+    assert "Dimensions: 背景概览" in result["structured_report"]
+
+
+def test_reporting_service_falls_back_when_report_llm_times_out(workspace_tmp_path):
+    config = Configuration(
+        enable_notes=False,
+        notes_workspace=str(workspace_tmp_path / "notes"),
+        langgraph_checkpoint_path=str(workspace_tmp_path / "checkpoints.sqlite"),
+    )
+    agent = TimeoutReportAgent()
+    service = ReportingService(agent, config)
+    state = SummaryState(
+        research_topic="AI vendor comparison",
+        todo_items=[
+            TodoItem(
+                id=1,
+                title="Model capability",
+                intent="Compare model capability",
+                query="AI vendor model capability 2026",
+                dimension="Model",
+                status="completed",
+                summary="- OpenAI leads on frontier multimodal capability.\n- Google remains strong in research breadth.",
+                sources_summary="- OpenAI release notes: https://example.com/openai\n- Google Gemini update: https://example.com/google",
+            )
+        ],
+    )
+    task_results = [
+        {
+            "task_id": 1,
+            "title": "Model capability",
+            "dimension": "Model",
+            "summary": "OpenAI leads on frontier multimodal capability.",
+            "key_findings": ["OpenAI leads on frontier multimodal capability."],
+            "evidence_points": ["Google remains strong in research breadth."],
+            "citations": ["https://example.com/openai"],
+        }
+    ]
+
+    outline = service.build_report_outline(state, task_results=task_results)
+    report = service.generate_report(
+        state,
+        report_outline=outline,
+        task_results=task_results,
+    )
+
+    assert "兜底报告" in report
+    assert "Request timed out" in report
+    assert "https://example.com/openai" in report
+    assert agent.clear_count == 2
 
 
 def test_event_translator_maps_custom_graph_events():
@@ -224,6 +364,10 @@ def test_research_stream_endpoint_emits_full_sequence(mocked_runner):
             events.append(payload)
 
     event_types = [event["type"] for event in events]
+    assert events[0] == {
+        "type": "status",
+        "message": "后端已接收研究请求，正在启动 LangGraph 工作流",
+    }
     assert "todo_list" in event_types
     assert "sources" in event_types
     assert "task_summary_chunk" in event_types

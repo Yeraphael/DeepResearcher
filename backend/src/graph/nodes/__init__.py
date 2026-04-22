@@ -22,6 +22,7 @@ def serialize_task(task: TodoItem) -> dict[str, Any]:
         "title": task.title,
         "intent": task.intent,
         "query": task.query,
+        "dimension": task.dimension,
         "status": task.status,
         "summary": task.summary,
         "sources_summary": task.sources_summary,

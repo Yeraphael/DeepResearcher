@@ -15,6 +15,7 @@ class TodoItem:
     title: str
     intent: str
     query: str
+    dimension: Optional[str] = field(default=None)
     status: str = field(default="pending")
     summary: Optional[str] = field(default=None)
     sources_summary: Optional[str] = field(default=None)
@@ -39,6 +40,7 @@ class SummaryState:
     running_summary: str = field(default=None)  # Legacy summary field
     todo_items: Annotated[list, operator.add] = field(default_factory=list)
     structured_report: Optional[str] = field(default=None)
+    report_outline: Optional[dict] = field(default=None)
     report_note_id: Optional[str] = field(default=None)
     report_note_path: Optional[str] = field(default=None)
     errors: list[str] = field(default_factory=list)

@@ -25,6 +25,11 @@ class Configuration(BaseModel):
         title="Research Depth",
         description="Number of research iterations to perform",
     )
+    max_parallel_research_tasks: int = Field(
+        default=3,
+        title="Parallel Research Tasks",
+        description="Maximum number of LangGraph research workers to execute concurrently",
+    )
     local_llm: str = Field(
         default="llama3.2",
         title="Local Model Name",
@@ -157,6 +162,7 @@ class Configuration(BaseModel):
             "lmstudio_base_url": os.getenv("LMSTUDIO_BASE_URL"),
             "ollama_base_url": os.getenv("OLLAMA_BASE_URL"),
             "max_web_research_loops": os.getenv("MAX_WEB_RESEARCH_LOOPS"),
+            "max_parallel_research_tasks": os.getenv("MAX_PARALLEL_RESEARCH_TASKS"),
             "fetch_full_page": os.getenv("FETCH_FULL_PAGE"),
             "strip_thinking_tokens": os.getenv("STRIP_THINKING_TOKENS"),
             "use_tool_calling": os.getenv("USE_TOOL_CALLING"),

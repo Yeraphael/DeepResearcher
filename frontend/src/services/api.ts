@@ -1,5 +1,9 @@
+const configuredBaseURL = String(
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
+);
 const baseURL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  configuredBaseURL.split("#")[0].trim().replace(/\/+$/, "") ||
+  "http://localhost:8000";
 
 export interface ResearchRequest {
   topic: string;
@@ -33,7 +37,7 @@ export async function runResearchStream(
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(
-      errorText || `研究请求失败，状态码：${response.status}`
+      parseErrorText(errorText) || `研究请求失败，状态码：${response.status}`
     );
   }
 
@@ -93,4 +97,22 @@ export async function runResearchStream(
       break;
     }
   }
+}
+
+function parseErrorText(raw: string): string {
+  const text = raw.trim();
+  if (!text) {
+    return "";
+  }
+
+  try {
+    const payload = JSON.parse(text) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return payload.detail.trim();
+    }
+  } catch {
+    // Fall through to returning the raw server text.
+  }
+
+  return text;
 }

@@ -23,6 +23,7 @@ def build_running_summary(tasks: list[TodoItem]) -> str:
             continue
         completed_blocks.append(
             f"## 任务 {task.id}: {task.title}\n"
+            f"- 比较维度：{task.dimension or task.title}\n"
             f"- 任务意图：{task.intent}\n"
             f"- 搜索查询：{task.query}\n"
             f"- 当前状态：{task.status}\n"

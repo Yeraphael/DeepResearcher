@@ -6,10 +6,10 @@ from typing import Callable
 
 try:
     from . import convert_tool_event, emit_graph_event, serialize_task
-    from ..state import ResearchGraphState, to_summary_state
+    from ..state import ResearchGraphState, task_to_spec, to_summary_state
 except ImportError:  # pragma: no cover - script-mode fallback
     from graph.nodes import convert_tool_event, emit_graph_event, serialize_task
-    from graph.state import ResearchGraphState, to_summary_state
+    from graph.state import ResearchGraphState, task_to_spec, to_summary_state
 
 
 def make_plan_tasks_node(runtime: object) -> Callable[[ResearchGraphState], ResearchGraphState]:
@@ -49,6 +49,7 @@ def make_plan_tasks_node(runtime: object) -> Callable[[ResearchGraphState], Rese
             "status": "running",
             "current_stage": "plan_tasks",
             "todo_items": todo_items,
+            "task_specs": [task_to_spec(task) for task in todo_items],
             "ui_events": ui_events,
         }
 

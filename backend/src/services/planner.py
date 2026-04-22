@@ -54,6 +54,7 @@ class PlanningService:
             title = str(item.get("title") or f"任务{idx}").strip()
             intent = str(item.get("intent") or "聚焦主题的关键问题").strip()
             query = str(item.get("query") or state.research_topic).strip()
+            dimension = str(item.get("dimension") or title).strip()
 
             if not query:
                 query = state.research_topic
@@ -63,6 +64,7 @@ class PlanningService:
                 title=title,
                 intent=intent,
                 query=query,
+                dimension=dimension,
             )
             todo_items.append(task)
 
@@ -81,6 +83,7 @@ class PlanningService:
             title="基础背景梳理",
             intent="收集主题的核心背景与最新动态",
             query=f"{state.research_topic} 最新进展" if state.research_topic else "基础背景梳理",
+            dimension="背景概览",
         )
 
     # ------------------------------------------------------------------

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, AsyncIterator, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -151,12 +151,13 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/research", response_model=ResearchResponse)
-    def run_research(payload: ResearchRequest) -> ResearchResponse:
+    async def run_research(payload: ResearchRequest) -> ResearchResponse:
         agent: DeepResearchAgent | None = None
         try:
+            logger.info("Received /research request: topic=%s", payload.topic[:120])
             config = _build_config(payload)
-            agent = DeepResearchAgent(config=config)
-            result = agent.run(
+            agent = await DeepResearchAgent.create(config=config)
+            result = await agent.arun(
                 payload.topic,
                 thread_id=payload.thread_id,
                 session_id=payload.session_id,
@@ -170,7 +171,7 @@ def create_app() -> FastAPI:
             ) from exc
         finally:
             if agent is not None:
-                agent.close()
+                await agent.aclose()
 
         todo_payload = [
             {
@@ -178,6 +179,7 @@ def create_app() -> FastAPI:
                 "title": item.title,
                 "intent": item.intent,
                 "query": item.query,
+                "dimension": item.dimension,
                 "status": item.status,
                 "summary": item.summary,
                 "sources_summary": item.sources_summary,
@@ -193,16 +195,22 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/research/stream")
-    def stream_research(payload: ResearchRequest) -> StreamingResponse:
+    async def stream_research(payload: ResearchRequest) -> StreamingResponse:
         try:
+            logger.info("Received /research/stream request: topic=%s", payload.topic[:120])
             config = _build_config(payload)
-            agent = DeepResearchAgent(config=config)
+            agent = await DeepResearchAgent.create(config=config)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        def event_iterator() -> Iterator[str]:
+        async def event_iterator() -> AsyncIterator[str]:
             try:
-                for event in agent.run_stream(
+                accepted_payload = {
+                    "type": "status",
+                    "message": "后端已接收研究请求，正在启动 LangGraph 工作流",
+                }
+                yield f"data: {json.dumps(accepted_payload, ensure_ascii=False)}\n\n"
+                async for event in agent.arun_stream(
                     payload.topic,
                     thread_id=payload.thread_id,
                     session_id=payload.session_id,
@@ -216,7 +224,7 @@ def create_app() -> FastAPI:
                 }
                 yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
             finally:
-                agent.close()
+                await agent.aclose()
 
         return StreamingResponse(
             event_iterator(),

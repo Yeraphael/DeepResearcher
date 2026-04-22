@@ -20,7 +20,6 @@ except ImportError:  # pragma: no cover - script-mode fallback
     from services.notes import build_note_guidance
     from services.text_processing import strip_tool_calls
 
-
 class SummarizationService:
     """Handles synchronous and streaming task summarization."""
 
@@ -28,9 +27,12 @@ class SummarizationService:
         self,
         summarizer_factory: Callable[[], ToolAwareSimpleAgent],
         config: Configuration,
+        *,
+        include_note_guidance: bool = True,
     ) -> None:
         self._agent_factory = summarizer_factory
         self._config = config
+        self._include_note_guidance = include_note_guidance
 
     def summarize_task(self, state: SummaryState, task: TodoItem, context: str) -> str:
         """Generate a task-specific summary using the summarizer agent."""
@@ -121,12 +123,23 @@ class SummarizationService:
     def _build_prompt(self, state: SummaryState, task: TodoItem, context: str) -> str:
         """Construct the summarization prompt shared by both modes."""
 
+        note_guidance = f"{build_note_guidance(task)}\n" if self._include_note_guidance else ""
+        closing_instruction = (
+            "请先吸收上面的上下文，再返回一份面向用户的 Markdown 总结，"
+            "要求覆盖关键发现、证据与风险。"
+        )
+        if self._include_note_guidance:
+            closing_instruction = (
+                "请按照以上协作要求先同步笔记，然后返回一份面向用户的 Markdown 总结"
+                "（仍遵循任务总结模板）。"
+            )
+
         return (
             f"任务主题：{state.research_topic}\n"
             f"任务名称：{task.title}\n"
             f"任务目标：{task.intent}\n"
             f"检索查询：{task.query}\n"
             f"任务上下文：\n{context}\n"
-            f"{build_note_guidance(task)}\n"
-            "请按照以上协作要求先同步笔记，然后返回一份面向用户的 Markdown 总结（仍遵循任务总结模板）。"
+            f"{note_guidance}"
+            f"{closing_instruction}"
         )
