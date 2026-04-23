@@ -13,6 +13,26 @@
 
 因此，本项目重点关注“研究过程自动化”而不是“单次答案生成”。
 
+**项目演示**
+
+![图1](./assets/README/图1.png)
+
+![image-20260423134819798](./assets/README/image-20260423134819798.png)
+
+详见backend/notes
+
+![c098a61cda1e44b4ed80605148093093](./assets/README/c098a61cda1e44b4ed80605148093093.png)
+
+![image-20260423134719417](./assets/README/image-20260423134719417.png)
+
+
+
+
+
+
+
+
+
 ---
 
 ## 项目目标
